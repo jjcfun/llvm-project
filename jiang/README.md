@@ -13,6 +13,6 @@ bash ./jiang/build_sdk.sh --package-revision 1
 The script verifies the upstream LLVM revision, records the SDK recipe in a manifest, checks the installed tools,
 and writes a `.tar.zst` archive with SHA-256 metadata under `build/jiang-sdk`.
 
-The `Jiang LLVM SDK` workflow builds Linux x86_64 and macOS arm64 candidates for Jiang maintenance and SDK feature
-branches. Pushing a `jiang-sdk-llvm-22.1.8-N` tag verifies both platform assets before publishing the prerelease.
-Manual publishing, when available from the default branch, is accepted only for `jiang/22.1.8`.
+The `Jiang LLVM SDK` workflow builds Linux x86_64 and macOS arm64 candidates for SDK feature branches. Every run
+verifies and consolidates both platform assets. Pushing a `jiang-sdk-llvm-22.1.8-N` tag resumes or creates a draft,
+checks every uploaded asset digest, and publishes the prerelease only after the remote assets match.

@@ -3,7 +3,6 @@ name: Jiang LLVM SDK
 on:
   push:
     branches:
-      - "jiang/**"
       - "feat/jiang-sdk-*"
     tags:
       - "jiang-sdk-llvm-22.1.8-*"
@@ -14,11 +13,6 @@ on:
         required: true
         default: "1"
         type: string
-      publish:
-        description: Publish an immutable-release candidate from jiang/22.1.8
-        required: true
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -39,10 +33,9 @@ jobs:
         id: version
         env:
           INPUT_PACKAGE_REVISION: ${{ inputs.package_revision }}
-          INPUT_PUBLISH: ${{ inputs.publish }}
         run: |
           package_revision="$INPUT_PACKAGE_REVISION"
-          publish="$INPUT_PUBLISH"
+          publish=false
           case "$GITHUB_REF" in
             refs/tags/jiang-sdk-llvm-22.1.8-*)
               package_revision="${GITHUB_REF_NAME#jiang-sdk-llvm-22.1.8-}"
@@ -58,14 +51,8 @@ jobs:
               exit 1
               ;;
           esac
-          if [ "$publish" = "true" ] && [ "$GITHUB_REF_TYPE" != "tag" ]; then
-            if [ "$GITHUB_REF_NAME" != "jiang/22.1.8" ]; then
-              echo "manual SDK releases must use jiang/22.1.8" >&2
-              exit 1
-            fi
-          fi
           echo "package_revision=$package_revision" >>"$GITHUB_OUTPUT"
-          echo "publish=${publish:-false}" >>"$GITHUB_OUTPUT"
+          echo "publish=$publish" >>"$GITHUB_OUTPUT"
 
   build:
     name: Build ${{ matrix.host }}
@@ -112,15 +99,12 @@ jobs:
           compression-level: 0
           retention-days: 7
 
-  publish:
-    name: Publish SDK
-    if: needs.prepare.outputs.publish == 'true'
+  verify-assets:
+    name: Verify SDK assets
     needs:
       - prepare
       - build
     runs-on: ubuntu-22.04
-    permissions:
-      contents: write
     steps:
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
@@ -130,21 +114,84 @@ jobs:
 
       - name: Verify release assets
         working-directory: release-assets
+        env:
+          PACKAGE_REVISION: ${{ needs.prepare.outputs.package_revision }}
         run: |
+          linux_asset="jiang-llvm-22.1.8-$PACKAGE_REVISION-linux-x86_64.tar.zst"
+          macos_asset="jiang-llvm-22.1.8-$PACKAGE_REVISION-macos-arm64.tar.zst"
+          test -f "$linux_asset"
+          test -f "$macos_asset"
           sha256sum --check ./*.tar.zst.sha256
           test "$(find . -maxdepth 1 -name '*.tar.zst' | wc -l)" -eq 2
           sha256sum ./*.tar.zst >SHA256SUMS
+          sha256sum ./*.tar.zst ./*.tar.zst.manifest.json ./*.tar.zst.sha256 SHA256SUMS \
+            >ASSET_SHA256SUMS
+
+      - name: Upload verified release assets
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: jiang-llvm-sdk-release-assets
+          path: release-assets/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    name: Publish SDK
+    if: needs.prepare.outputs.publish == 'true'
+    needs:
+      - prepare
+      - verify-assets
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: jiang-llvm-sdk-release-assets
+          path: release-assets
 
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           PACKAGE_REVISION: ${{ needs.prepare.outputs.package_revision }}
         run: |
+          verify_remote_assets() {
+            release_json="$1"
+            expected_count="$(find release-assets -maxdepth 1 -type f | wc -l | tr -d ' ')"
+            actual_count="$(printf '%s' "$release_json" | jq '.assets | length')"
+            test "$actual_count" -eq "$expected_count"
+
+            while read -r digest name; do
+              remote_digest="$(printf '%s' "$release_json" | jq -r --arg name "$name" \
+                '.assets[] | select(.name == $name) | .digest')"
+              test "$remote_digest" = "sha256:$digest"
+            done <release-assets/ASSET_SHA256SUMS
+
+            asset_sums_digest="$(sha256sum release-assets/ASSET_SHA256SUMS | cut -d ' ' -f 1)"
+            remote_asset_sums_digest="$(printf '%s' "$release_json" | jq -r \
+              '.assets[] | select(.name == "ASSET_SHA256SUMS") | .digest')"
+            test "$remote_asset_sums_digest" = "sha256:$asset_sums_digest"
+          }
+
           tag="jiang-sdk-llvm-22.1.8-$PACKAGE_REVISION"
-          gh release create "$tag" \
-            release-assets/* \
-            --draft \
-            --target "$GITHUB_SHA" \
-            --title "Jiang LLVM SDK 22.1.8-$PACKAGE_REVISION" \
-            --notes "Jiang build-time LLVM 22.1.8 SDK for Linux x86_64 and macOS arm64."
-          gh release edit "$tag" --draft=false --prerelease
+          if gh release view "$tag" >/dev/null 2>&1; then
+            is_draft="$(gh release view "$tag" --json isDraft --jq .isDraft)"
+            if [ "$is_draft" != "true" ]; then
+              release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag")"
+              verify_remote_assets "$release_json"
+              echo "release $tag is already published and verified"
+              exit 0
+            fi
+          else
+            gh release create "$tag" \
+              --draft \
+              --verify-tag \
+              --title "Jiang LLVM SDK 22.1.8-$PACKAGE_REVISION" \
+              --notes "Jiang build-time LLVM 22.1.8 SDK for Linux x86_64 and macOS arm64."
+          fi
+
+          gh release upload "$tag" release-assets/* --clobber
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag")"
+          verify_remote_assets "$release_json"
+          gh release edit "$tag" --draft=false --prerelease --latest=false
