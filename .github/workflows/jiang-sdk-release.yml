@@ -215,9 +215,11 @@ jobs:
 
           tag="jiang-sdk-llvm-22.1.8-$PACKAGE_REVISION"
           if gh release view "$tag" >/dev/null 2>&1; then
-            is_draft="$(gh release view "$tag" --json isDraft --jq .isDraft)"
+            release_info="$(gh release view "$tag" --json databaseId,isDraft)"
+            release_id="$(printf '%s' "$release_info" | jq -r .databaseId)"
+            is_draft="$(printf '%s' "$release_info" | jq -r .isDraft)"
             if [ "$is_draft" != "true" ]; then
-              release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag")"
+              release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id")"
               verify_remote_assets "$release_json"
               echo "release $tag is already published and verified"
               exit 0
@@ -228,9 +230,10 @@ jobs:
               --verify-tag \
               --title "Jiang LLVM SDK 22.1.8-$PACKAGE_REVISION" \
               --notes "Jiang build-time LLVM 22.1.8 SDK for Linux x86_64 and macOS arm64."
+            release_id="$(gh release view "$tag" --json databaseId --jq .databaseId)"
           fi
 
           gh release upload "$tag" release-assets/* --clobber
-          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag")"
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id")"
           verify_remote_assets "$release_json"
           gh release edit "$tag" --draft=false --prerelease --latest=false
