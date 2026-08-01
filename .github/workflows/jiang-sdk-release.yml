@@ -173,7 +173,10 @@ jobs:
 
   publish:
     name: Publish SDK
-    if: needs.prepare.outputs.publish == 'true'
+    if: >-
+      always() &&
+      needs.verify-assets.result == 'success' &&
+      needs.prepare.outputs.publish == 'true'
     needs:
       - prepare
       - verify-assets
