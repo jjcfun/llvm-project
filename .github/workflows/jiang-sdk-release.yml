@@ -1,6 +1,12 @@
 name: Jiang LLVM SDK
 
 on:
+  push:
+    branches:
+      - "jiang/**"
+      - "feat/jiang-sdk-*"
+    tags:
+      - "jiang-sdk-llvm-22.1.8-*"
   workflow_dispatch:
     inputs:
       package_revision:
@@ -18,12 +24,52 @@ permissions:
   contents: read
 
 concurrency:
-  group: jiang-llvm-sdk-${{ inputs.package_revision }}
+  group: jiang-llvm-sdk-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  prepare:
+    name: Resolve SDK version
+    runs-on: ubuntu-22.04
+    outputs:
+      package_revision: ${{ steps.version.outputs.package_revision }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - name: Resolve trigger
+        id: version
+        env:
+          INPUT_PACKAGE_REVISION: ${{ inputs.package_revision }}
+          INPUT_PUBLISH: ${{ inputs.publish }}
+        run: |
+          package_revision="$INPUT_PACKAGE_REVISION"
+          publish="$INPUT_PUBLISH"
+          case "$GITHUB_REF" in
+            refs/tags/jiang-sdk-llvm-22.1.8-*)
+              package_revision="${GITHUB_REF_NAME#jiang-sdk-llvm-22.1.8-}"
+              publish=true
+              ;;
+          esac
+          if [ -z "$package_revision" ]; then
+            package_revision=1
+          fi
+          case "$package_revision" in
+            *[!0-9]*|0)
+              echo "package revision must be a positive integer" >&2
+              exit 1
+              ;;
+          esac
+          if [ "$publish" = "true" ] && [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            if [ "$GITHUB_REF_NAME" != "jiang/22.1.8" ]; then
+              echo "manual SDK releases must use jiang/22.1.8" >&2
+              exit 1
+            fi
+          fi
+          echo "package_revision=$package_revision" >>"$GITHUB_OUTPUT"
+          echo "publish=${publish:-false}" >>"$GITHUB_OUTPUT"
+
   build:
     name: Build ${{ matrix.host }}
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
@@ -51,7 +97,7 @@ jobs:
       - name: Build SDK
         run: |
           bash ./jiang/build_sdk.sh \
-            --package-revision "${{ inputs.package_revision }}" \
+            --package-revision "${{ needs.prepare.outputs.package_revision }}" \
             --parallel 3
 
       - name: Upload SDK candidate
@@ -68,21 +114,14 @@ jobs:
 
   publish:
     name: Publish SDK
-    if: inputs.publish
-    needs: build
+    if: needs.prepare.outputs.publish == 'true'
+    needs:
+      - prepare
+      - build
     runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
-      - name: Require the maintenance branch
-        env:
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          if [ "$REF_NAME" != "jiang/22.1.8" ]; then
-            echo "SDK releases must be published from jiang/22.1.8" >&2
-            exit 1
-          fi
-
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           pattern: jiang-llvm-sdk-*
@@ -99,7 +138,7 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-          PACKAGE_REVISION: ${{ inputs.package_revision }}
+          PACKAGE_REVISION: ${{ needs.prepare.outputs.package_revision }}
         run: |
           tag="jiang-sdk-llvm-22.1.8-$PACKAGE_REVISION"
           gh release create "$tag" \
