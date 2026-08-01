@@ -202,9 +202,13 @@ jobs:
             test "$actual_count" -eq "$expected_count"
 
             while read -r digest name; do
+              name="${name#./}"
               remote_digest="$(printf '%s' "$release_json" | jq -r --arg name "$name" \
                 '.assets[] | select(.name == $name) | .digest')"
-              test "$remote_digest" = "sha256:$digest"
+              if [ "$remote_digest" != "sha256:$digest" ]; then
+                echo "release asset digest mismatch: $name" >&2
+                return 1
+              fi
             done <release-assets/ASSET_SHA256SUMS
 
             asset_sums_digest="$(sha256sum release-assets/ASSET_SHA256SUMS | cut -d ' ' -f 1)"
