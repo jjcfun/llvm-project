@@ -16,3 +16,6 @@ and writes a `.tar.zst` archive with SHA-256 metadata under `build/jiang-sdk`.
 The `Jiang LLVM SDK` workflow builds Linux x86_64 and macOS arm64 candidates for SDK feature branches. Every run
 verifies and consolidates both platform assets. Pushing a `jiang-sdk-llvm-22.1.8-N` tag resumes or creates a draft,
 checks every uploaded asset digest, and publishes the prerelease only after the remote assets match.
+
+If publishing fails after asset verification, push `jiang/sdk-publish-RUN_ID-N` from the maintenance branch while
+the consolidated artifact is retained. The recovery run revalidates and publishes those assets without rebuilding.

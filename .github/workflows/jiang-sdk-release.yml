@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "feat/jiang-sdk-*"
+      - "jiang/sdk-publish-*"
     tags:
       - "jiang-sdk-llvm-22.1.8-*"
   workflow_dispatch:
@@ -15,6 +16,7 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -28,6 +30,7 @@ jobs:
     outputs:
       package_revision: ${{ steps.version.outputs.package_revision }}
       publish: ${{ steps.version.outputs.publish }}
+      source_run_id: ${{ steps.version.outputs.source_run_id }}
     steps:
       - name: Resolve trigger
         id: version
@@ -36,9 +39,16 @@ jobs:
         run: |
           package_revision="$INPUT_PACKAGE_REVISION"
           publish=false
+          source_run_id=""
           case "$GITHUB_REF" in
             refs/tags/jiang-sdk-llvm-22.1.8-*)
               package_revision="${GITHUB_REF_NAME#jiang-sdk-llvm-22.1.8-}"
+              publish=true
+              ;;
+            refs/heads/jiang/sdk-publish-*)
+              recovery="${GITHUB_REF_NAME#jiang/sdk-publish-}"
+              package_revision="${recovery##*-}"
+              source_run_id="${recovery%-*}"
               publish=true
               ;;
           esac
@@ -51,11 +61,20 @@ jobs:
               exit 1
               ;;
           esac
+          case "$source_run_id" in
+            "") ;;
+            *[!0-9]*|0)
+              echo "source run id must be a positive integer" >&2
+              exit 1
+              ;;
+          esac
           echo "package_revision=$package_revision" >>"$GITHUB_OUTPUT"
           echo "publish=$publish" >>"$GITHUB_OUTPUT"
+          echo "source_run_id=$source_run_id" >>"$GITHUB_OUTPUT"
 
   build:
     name: Build ${{ matrix.host }}
+    if: needs.prepare.outputs.source_run_id == ''
     needs: prepare
     strategy:
       fail-fast: false
@@ -101,16 +120,32 @@ jobs:
 
   verify-assets:
     name: Verify SDK assets
+    if: >-
+      always() &&
+      needs.prepare.result == 'success' &&
+      (needs.build.result == 'success' || needs.prepare.outputs.source_run_id != '')
     needs:
       - prepare
       - build
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - name: Download SDK candidates
+        if: needs.prepare.outputs.source_run_id == ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: jiang-llvm-sdk-*
           path: release-assets
           merge-multiple: true
+
+      - name: Download retained release assets
+        if: needs.prepare.outputs.source_run_id != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: jiang-llvm-sdk-release-assets
+          path: release-assets
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ needs.prepare.outputs.source_run_id }}
 
       - name: Verify release assets
         working-directory: release-assets
