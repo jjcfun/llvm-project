@@ -48,7 +48,7 @@ jobs:
         run: |
           for source_archive in ./*.tar.zst; do
             gzip_archive="${source_archive%.tar.zst}.tar.gz"
-            zstd -dc "$source_archive" | gzip -n -9 >"$gzip_archive"
+            zstd -dc "$source_archive" | gzip -n -6 >"$gzip_archive"
             cp "$source_archive.manifest.json" "$gzip_archive.manifest.json"
             sha256sum "$gzip_archive" >"$gzip_archive.sha256"
             tar -tzf "$gzip_archive" >/dev/null

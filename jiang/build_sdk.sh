@@ -241,7 +241,7 @@ package_sdk() {
   write_manifest "$sdk_root" "$sdk_version" "$(git rev-parse HEAD)" "$host"
   verify_sdk "$sdk_root"
 
-  COPYFILE_DISABLE=1 tar -C "$package_root" -cf - "$archive_name" | gzip -n -9 >"$archive"
+  COPYFILE_DISABLE=1 tar -C "$package_root" -cf - "$archive_name" | gzip -n -6 >"$archive"
   digest="$(sha256_file "$archive")"
   printf '%s  %s\n' "$digest" "$(basename "$archive")" >"$archive.sha256"
   cp "$sdk_root/share/jiang/llvm-sdk.json" "$archive.manifest.json"
