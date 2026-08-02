@@ -98,7 +98,7 @@ jobs:
           command -v clang++
           command -v cmake
           command -v ninja
-          command -v zstd
+          command -v gzip
 
       - name: Build SDK
         run: |
@@ -111,9 +111,9 @@ jobs:
         with:
           name: jiang-llvm-sdk-${{ matrix.host }}
           path: |
-            build/jiang-sdk/*.tar.zst
-            build/jiang-sdk/*.tar.zst.manifest.json
-            build/jiang-sdk/*.tar.zst.sha256
+            build/jiang-sdk/*.tar.gz
+            build/jiang-sdk/*.tar.gz.manifest.json
+            build/jiang-sdk/*.tar.gz.sha256
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
@@ -152,14 +152,14 @@ jobs:
         env:
           PACKAGE_REVISION: ${{ needs.prepare.outputs.package_revision }}
         run: |
-          linux_asset="jiang-llvm-22.1.8-$PACKAGE_REVISION-linux-x86_64.tar.zst"
-          macos_asset="jiang-llvm-22.1.8-$PACKAGE_REVISION-macos-arm64.tar.zst"
+          linux_asset="jiang-llvm-22.1.8-$PACKAGE_REVISION-linux-x86_64.tar.gz"
+          macos_asset="jiang-llvm-22.1.8-$PACKAGE_REVISION-macos-arm64.tar.gz"
           test -f "$linux_asset"
           test -f "$macos_asset"
-          sha256sum --check ./*.tar.zst.sha256
-          test "$(find . -maxdepth 1 -name '*.tar.zst' | wc -l)" -eq 2
-          sha256sum ./*.tar.zst >SHA256SUMS
-          sha256sum ./*.tar.zst ./*.tar.zst.manifest.json ./*.tar.zst.sha256 SHA256SUMS \
+          sha256sum --check ./*.tar.gz.sha256
+          test "$(find . -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 2
+          sha256sum ./*.tar.gz >SHA256SUMS
+          sha256sum ./*.tar.gz ./*.tar.gz.manifest.json ./*.tar.gz.sha256 SHA256SUMS \
             >ASSET_SHA256SUMS
 
       - name: Upload verified release assets

@@ -1,0 +1,95 @@
+name: Repack Jiang LLVM SDK
+
+on:
+  push:
+    branches:
+      - "jiang/sdk-repack-*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: jiang-llvm-sdk-repack-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  repack:
+    name: Repack published SDK
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Resolve release
+        id: release
+        run: |
+          package_revision="${GITHUB_REF_NAME#jiang/sdk-repack-}"
+          case "$package_revision" in
+            *[!0-9]*|0)
+              echo "package revision must be a positive integer" >&2
+              exit 1
+              ;;
+          esac
+          echo "tag=jiang-sdk-llvm-22.1.8-$package_revision" >>"$GITHUB_OUTPUT"
+
+      - name: Download published zstd assets
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          mkdir release-assets
+          gh release download "$RELEASE_TAG" \
+            --dir release-assets \
+            --pattern '*.tar.zst' \
+            --pattern '*.tar.zst.manifest.json' \
+            --pattern '*.tar.zst.sha256'
+
+      - name: Repack and verify gzip assets
+        working-directory: release-assets
+        run: |
+          for source_archive in ./*.tar.zst; do
+            gzip_archive="${source_archive%.tar.zst}.tar.gz"
+            zstd -dc "$source_archive" | gzip -n -9 >"$gzip_archive"
+            cp "$source_archive.manifest.json" "$gzip_archive.manifest.json"
+            sha256sum "$gzip_archive" >"$gzip_archive.sha256"
+            tar -tzf "$gzip_archive" >/dev/null
+          done
+          test "$(find . -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 2
+          sha256sum --check ./*.tar.zst.sha256
+          sha256sum --check ./*.tar.gz.sha256
+          sha256sum ./*.tar.zst ./*.tar.gz >SHA256SUMS
+          sha256sum \
+            ./*.tar.zst \
+            ./*.tar.zst.manifest.json \
+            ./*.tar.zst.sha256 \
+            ./*.tar.gz \
+            ./*.tar.gz.manifest.json \
+            ./*.tar.gz.sha256 \
+            SHA256SUMS >ASSET_SHA256SUMS
+
+      - name: Publish gzip assets
+        working-directory: release-assets
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          gh release upload "$RELEASE_TAG" ./*.tar.gz* SHA256SUMS ASSET_SHA256SUMS --clobber
+
+      - name: Verify published assets
+        working-directory: release-assets
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          release_json="$(gh release view "$RELEASE_TAG" --json assets)"
+          while read -r digest name; do
+            name="${name#./}"
+            remote_digest="$(printf '%s' "$release_json" | jq -r --arg name "$name" \
+              '.assets[] | select(.name == $name) | .digest')"
+            test "$remote_digest" = "sha256:$digest"
+          done <ASSET_SHA256SUMS
+          digest="$(sha256sum ASSET_SHA256SUMS | cut -d ' ' -f 1)"
+          remote_digest="$(printf '%s' "$release_json" | jq -r \
+            '.assets[] | select(.name == "ASSET_SHA256SUMS") | .digest')"
+          test "$remote_digest" = "sha256:$digest"

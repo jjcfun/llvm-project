@@ -129,7 +129,7 @@ check_source() {
   fi
   while IFS= read -r changed_path; do
     case "$changed_path" in
-      jiang/*|.github/workflows/jiang-sdk-release.yml) ;;
+      jiang/*|.github/workflows/jiang-sdk-*.yml) ;;
       *) fail "unexpected change after LLVM revision $LLVM_REVISION: $changed_path" ;;
     esac
   done < <(git diff --name-only "$LLVM_REVISION" HEAD)
@@ -232,7 +232,7 @@ package_sdk() {
   local package_root="$BUILD_DIR/package"
   local archive_name="jiang-llvm-$sdk_version-$host"
   local sdk_root="$package_root/$archive_name"
-  local archive="$OUTPUT_DIR/$archive_name.tar.zst"
+  local archive="$OUTPUT_DIR/$archive_name.tar.gz"
   local digest
 
   rm -rf "$package_root"
@@ -241,7 +241,7 @@ package_sdk() {
   write_manifest "$sdk_root" "$sdk_version" "$(git rev-parse HEAD)" "$host"
   verify_sdk "$sdk_root"
 
-  COPYFILE_DISABLE=1 tar -C "$package_root" -cf - "$archive_name" | zstd --force -19 -T0 -o "$archive"
+  COPYFILE_DISABLE=1 tar -C "$package_root" -cf - "$archive_name" | gzip -n -9 >"$archive"
   digest="$(sha256_file "$archive")"
   printf '%s  %s\n' "$digest" "$(basename "$archive")" >"$archive.sha256"
   cp "$sdk_root/share/jiang/llvm-sdk.json" "$archive.manifest.json"
@@ -270,10 +270,10 @@ main() {
   require_command cmake
   require_command getconf
   require_command git
+  require_command gzip
   require_command ninja
   require_command sed
   require_command tar
-  require_command zstd
 
   cd "$ROOT_DIR"
   check_source
